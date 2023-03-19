@@ -20,7 +20,7 @@ PRINTF_BUFF      db (printf_buff_size + 1) dup (0h)
 ; Если буфер вывода полный, пишет его содержимое в файл.
 ; После этого выполняет переход по аргументу
 ;======================================================================
-; Entry: %1  - jmp addr
+; Entry: %1 - jmp addr
 ; Stack:  _____________________________________________________
 ;        |_...__VA_ARGS___|_format_|_fd_|_ret_addr_|_saved RBP_|...
 ;                                                              ^
@@ -137,6 +137,10 @@ Scan_format:
 
 .Switch:
 
+.Cmp_null:
+        cmp al, 0h
+        je .Exit
+
 .Cmp_octal:
         cmp al, 'o'
         jb .Cmp_binary                  ; if (al < 'o') jmp .Cmp_binary
@@ -164,6 +168,32 @@ Scan_format:
 
 ;----------------------------------------------------------------------
 
+.Exit:
+        sub  rdi, PRINTF_BUFF       ; rdi = number of characters to write
+
+        mov  rax, 1h                ; write(fd, buf, count)
+        mov  rdx, rdi               ; rdx  = count
+        mov  rdi, [rbp + 10h]       ; rdi  = fd
+        mov  rsi, PRINTF_BUFF       ; rsi -> PRINTF_BUFF
+        syscall
+
+        pop rbp
+        ret
+
+;----------------------------------------------------------------------
+; HANDLERS
+;----------------------------------------------------------------------
+; RAX -  conversion specifier
+; RCX -  printf_buff size left
+; RSI -  format + format_shift
+; RDI -  PRINTF_BUFF + buff_shift
+; R8  -> cur_arg
+;----------------------------------------------------------------------
+
+;----------------------------------------------------------------------
+; %b
+;----------------------------------------------------------------------
+
 section .text
 Printf_binary:
         mov r10,  r8                ; save r8
@@ -172,12 +202,12 @@ Printf_binary:
 
 .Skip_front_zero:
         cmp r8, 0h
-        je .Printf_value
+        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
 
-        test r8, mask_binary
+        test r8, r11
         jnz .Printf_value           ; if (highest_bit(r8) != 0) jmp .Printf_value
 
-        shl r8, 1                   ; r8 = r8 << 1
+        shl r8, 1h                  ; r8 = r8 << log(2)
         jmp .Skip_front_zero
 
 .Printf_value:
@@ -193,6 +223,7 @@ Printf_binary:
         je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
 
         mov r11, mask_binary        ; r11 = mask
+        shl r8, 1h                  ; r8 = r8 << log(2)
         Is_full_buff .Printf_value
 
 .Printf_suffix:
@@ -208,15 +239,98 @@ Printf_binary:
         jmp Scan_format
 
 ;----------------------------------------------------------------------
+; %o (only 63 bits)
+;----------------------------------------------------------------------
 
-.Exit:
-        sub  rdi, PRINTF_BUFF       ; rdi = number of characters to write
+section .text
+Printf_octal:
+        mov r10,  r8                ; save r8
+        mov r8 , [r8]               ; r8 = number to print
+        shl r8 , 1h                 ; skip first bit
+        mov r11, mask_octal         ; r11 = mask
 
-        mov  rax, 1h                ; write(fd, buf, count)
-        mov  rdx, rdi               ; rdx  = count
-        mov  rdi, [rbp + 10h]       ; rdi  = fd
-        mov  rsi, PRINTF_BUFF       ; rsi -> PRINTF_BUFF
-        syscall
+.Skip_front_zero:
+        cmp r8, 0h
+        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
 
-        pop rbp
-        ret
+        test r8, r11
+        jnz .Printf_value           ; if (highest_octal_digit(r8) != 0) jmp .Printf_value
+
+        shl r8, 3h                  ; r8 = r8 << log(8)
+        jmp .Skip_front_zero
+
+.Printf_value:
+        and r11, r8                 ; highest_octal_digit(r11) =  highest_hex_digit(r8)
+        shr r11, 61d                ; highest_octal_digit(r11) -> smallest_hex_digit(r11)
+
+        mov  r11 , DIGIT_TABLE[r11]
+        mov [rdi], r11              ;
+        inc  rdi                    ; <=> stosb (r11 -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        cmp r8, 0h
+        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
+
+        mov r11, mask_hex           ; r11 = mask
+        shl r8, 3h                  ; r8 = r8 << log(8)
+        Is_full_buff .Printf_value
+
+.Printf_suffix:
+        Is_full_buff .Suffix_only
+.Suffix_only:
+        mov r8, r10                 ; r8 -> cur_arg
+        lea r8, [r8 + 8h]           ; r8 -> next_arg
+
+        mov [rdi], 'l'              ;
+        inc  rdi                    ; <=> stosb ('l' -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        jmp Scan_format
+
+;----------------------------------------------------------------------
+; %h
+;----------------------------------------------------------------------
+
+section .text
+Printf_hex:
+        mov r10,  r8                ; save r8
+        mov r8 , [r8]               ; r8  = number to print
+        mov r11, mask_hex           ; r11 = mask
+
+.Skip_front_zero:
+        cmp r8, 0h
+        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
+
+        test r8, r11
+        jnz .Printf_value           ; if (highest_hex_digit(r8) != 0) jmp .Printf_value
+
+        shl r8, 4h                  ; r8 = r8 << log(16)
+        jmp .Skip_front_zero
+
+.Printf_value:
+        and r11, r8                 ; highest_hex_digit(r11) =  highest_hex_digit(r8)
+        shr r11, 60d                ; highest_hex_digit(r11) -> smallest_hex_digit(r11)
+
+        mov  r11 , DIGIT_TABLE[r11]
+        mov [rdi], r11              ;
+        inc  rdi                    ; <=> stosb (r11 -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        cmp r8, 0h
+        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
+
+        mov r11, mask_hex           ; r11 = mask
+        shl r8, 4h                  ; r8 = r8 << log(16)
+        Is_full_buff .Printf_value
+
+.Printf_suffix:
+        Is_full_buff .Suffix_only
+.Suffix_only:
+        mov r8, r10                 ; r8 -> cur_arg
+        lea r8, [r8 + 8h]           ; r8 -> next_arg
+
+        mov [rdi], 'h'              ;
+        inc  rdi                    ; <=> stosb ('h' -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        jmp Scan_format
