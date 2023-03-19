@@ -164,6 +164,51 @@ Scan_format:
 
 ;----------------------------------------------------------------------
 
+section .text
+Printf_binary:
+        mov r10,  r8                ; save r8
+        mov r8 , [r8]               ; r8  = number to print
+        mov r11, mask_binary        ; r11 = mask
+
+.Skip_front_zero:
+        cmp r8, 0h
+        je .Printf_value
+
+        test r8, mask_binary
+        jnz .Printf_value           ; if (highest_bit(r8) != 0) jmp .Printf_value
+
+        shl r8, 1                   ; r8 = r8 << 1
+        jmp .Skip_front_zero
+
+.Printf_value:
+        and r11, r8                 ; highest_bit(r11) =  highest_bit(r8)
+        shr r11, 63d                ; highest_bit(r11) -> smallest_bit(r11)
+
+        mov  r11 , DIGIT_TABLE[r11]
+        mov [rdi], r11              ;
+        inc  rdi                    ; <=> stosb (r11 -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        cmp r8, 0h
+        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
+
+        mov r11, mask_binary        ; r11 = mask
+        Is_full_buff .Printf_value
+
+.Printf_suffix:
+        Is_full_buff .Suffix_only
+.Suffix_only:
+        mov r8, r10                 ; r8 -> cur_arg
+        lea r8, [r8 + 8h]           ; r8 -> next_arg
+
+        mov [rdi], 'b'              ;
+        inc  rdi                    ; <=> stosb ('b' -> [rdi])
+        dec  rcx                    ; printf_buff size left --
+
+        jmp Scan_format
+
+;----------------------------------------------------------------------
+
 .Exit:
         sub  rdi, PRINTF_BUFF       ; rdi = number of characters to write
 
