@@ -136,10 +136,11 @@ Scan_format:
         Stos_continue Scan_format
 
 .Switch:
+        lodsb
 
 .Cmp_null:
         cmp al, 0h
-        je .Exit
+        je .Exit                        ; if (al == '\0') jmp .Cmp_binary
 
 .Cmp_octal:
         cmp al, 'o'
@@ -334,3 +335,34 @@ Printf_hex:
         dec  rcx                    ; printf_buff size left --
 
         jmp Scan_format
+
+;----------------------------------------------------------------------
+; %c
+;----------------------------------------------------------------------
+
+Printf_char:
+        mov al, [r8]        ; al = character to print
+        lea r8, [r8 + 8h]   ; r8 -> next_arg
+
+        Stos_continue Scan_format
+
+;----------------------------------------------------------------------
+; %s
+;----------------------------------------------------------------------
+
+Printf_string:
+        mov r10, rsi                ; save rsi
+        mov rsi, [r8]               ; rsi -> string to print
+
+.Printf_value:
+        lodsb                       ; [rsi] -> al
+        cmp al, 0h
+        je .String_end              ; if (al == '\0') Is_full_buff Scan_format
+
+        Is_full_buff Printf_value
+
+.String_end:
+        lea r8 , [r8 + 8h]           ; r8 -> next arg
+        mov rsi, r10
+
+        Is_full_buff Scan_format
