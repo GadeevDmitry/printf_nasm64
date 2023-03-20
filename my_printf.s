@@ -190,7 +190,6 @@ Scan_format:
 ; R8  -> cur_arg
 ;----------------------------------------------------------------------
 
-
 ;======================================================================
 ; %b, %o, %x handler
 ;======================================================================
@@ -215,7 +214,7 @@ Scan_format:
 
 .Digit_in_stack:
         and  r11 , r8
-        mov  r11b, DIGIT_TABLE[r11] ; r11 = ASCII(r11)
+        mov  r11b, DIGIT_TABLE[r11] ; r11b = ASCII(r11)
         push r11                    ; store in stack
 
         mov r11, %1                 ; r11 = mask of last digit
@@ -270,7 +269,37 @@ Printf_hex: Printf_2power_number_system mask_hex, 4h, 'h'
 ; %d
 ;----------------------------------------------------------------------
 
-Printf_decimal: jmp Printf_default
+Printf_decimal:
+        xor rdx, rdx
+        mov rax, [r8]       ; rdx:rax = number to print
+        mov r10, 10d
+
+.Digit_in_stack:
+        div  r10                    ; rdx = num % 10d, rax = num / 10d
+        mov  dl, DIGIT_TABLE[rdx]   ; dl = ASCII(rdx)
+        push rdx                    ; store in stack
+
+        xor rdx, rdx                ; rdx:rax = number // 10d
+        cmp rax, 0h
+        jne .Digit_in_stack         ; if (rax != 0) jmp .Digit_in_stack
+
+.Digit_in_buff:
+        pop rax                     ; rax = highest digit
+        Just_stos                   ; store rax in the buff
+        cmp rsp, rbp
+        je .Next_arg_buff_check     ; if (rsp == rbp) jmp .Next_arg_buff_check
+        Is_full_buff .Digit_in_buff ; <- else
+
+.Next_arg_buff_check:
+        Is_full_buff .Next_arg
+.Next_arg:
+        lea r8, [r8 + 8h]           ; r8 -> next_arg
+
+        mov byte [rdi], 'd'         ;
+        inc rdi                     ; <=> stosb ('d' -> [rdi])
+        dec rcx                     ; printf_buff_size left --
+
+        Is_full_buff Scan_format
 
 ;----------------------------------------------------------------------
 ; %c
