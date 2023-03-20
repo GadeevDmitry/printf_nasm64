@@ -8,9 +8,10 @@ JMP_MORE    dq Printf_octal , Printf_default, Printf_default, Printf_default, Pr
 ;                         %o,             %p,             %q,             %r,            %s
 DIGIT_TABLE db "0123456789ABCDEF"
 
-mask_binary equ 01h ; mask of lowest binary digit
-mask_octal  equ 07h ; mask of lowest octal  digit
-mask_hex    equ 0Fh ; mask of lowest hex    digit
+mask_binary         equ 01h                 ; mask of lowest binary digit
+mask_octal          equ 07h                 ; mask of lowest octal  digit
+mask_hex            equ 0Fh                 ; mask of lowest hex    digit
+mask_highest_byte   equ 8000000000000000h   ; mask of hihest byte of 64bit number (to determine the sign)
 
 section .bss
 
@@ -208,9 +209,24 @@ Scan_format:
 
 %macro Printf_2power_number_system 3
 
-        mov r10,  r8        ; save r8
-        mov r8 , [r8]       ; r8  = number to print
-        mov r11, %1         ; r11 = mask of last digit
+        mov r10,  r8                ; save r8
+        mov r8 , [r8]               ; r8 = number to print
+
+        mov  r9, mask_highest_byte  ; r9 = mask of highest byte (to determine the sign)
+        test r9, r8
+        jz  .Printf_abs             ; if (r8 >= 0) jmp .Printf_abs
+
+.Negative_num:
+        mov byte [rdi], '-'         ;
+        inc rdi                     ; <=> stosb ('-' -> [rdi])
+        dec rcx                     ; printf_buff_size left --
+
+        not r8                      ;
+        inc r8                      ; r8 = abs(r8)
+        Is_full_buff .Printf_abs
+
+.Printf_abs:
+        mov r11, %1                 ; r11 = mask of last digit
 
 .Digit_in_stack:
         and  r11 , r8
@@ -271,9 +287,23 @@ Printf_hex: Printf_2power_number_system mask_hex, 4h, 'h'
 
 Printf_decimal:
         xor rdx, rdx
-        mov rax, [r8]       ; rdx:rax = number to print
+        mov rax, [r8]               ; rdx:rax = number to print
         mov r10, 10d
 
+        mov  r9, mask_highest_byte  ; r9 = mask of highest byte
+        test r9, rax
+        jz  .Printf_abs             ; if (rax >= 0) jmp .Printf_abs
+
+.Negative_num:
+        mov byte [rdi], '-'         ;
+        inc rdi                     ; <=> stosb ('-' -> [rdi])
+        dec rcx                     ; printf_buff_size left --
+
+        not rax                     ;
+        inc rax                     ; rax = abs(rax)
+        Is_full_buff .Printf_abs
+
+.Printf_abs:
 .Digit_in_stack:
         div  r10                    ; rdx = num % 10d, rax = num / 10d
         mov  dl, DIGIT_TABLE[rdx]   ; dl = ASCII(rdx)
