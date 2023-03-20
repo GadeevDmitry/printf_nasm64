@@ -197,6 +197,7 @@ Scan_format:
 
 section .text
 Printf_binary:
+        push rcx                    ; save rcx
         mov r10,  r8                ; save r8
         mov r8 , [r8]               ; r8  = number to print
         mov r11, mask_binary        ; r11 = mask
@@ -376,7 +377,7 @@ Printf_string:
         cmp al, 0h
         je .String_end              ; if (al == '\0') Is_full_buff Scan_format
 
-        Is_full_buff .Printf_value
+        Stos_continue .Printf_value
 
 .String_end:
         lea r8 , [r8 + 8h]           ; r8 -> next arg
