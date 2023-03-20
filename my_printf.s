@@ -154,7 +154,6 @@ Scan_format:
 
 .Cmp_binary:
         cmp al, 'b'
-        Just_stos
         jb .Stos_continue_scan          ; if (al < 'b') jmp .Stos_continue_scan
 
         cmp al, 'd'
@@ -166,7 +165,7 @@ Scan_format:
         cmp al, 'x'
         jne .Stos_continue_scan         ; if (al != 'x') jmp .Stos_continue_scan
 
-        jmp [JMP_MORE + 8*('x' - 'o')]
+        jmp Printf_hex
 
 ;----------------------------------------------------------------------
 
@@ -202,31 +201,33 @@ Printf_binary:
         mov r8 , [r8]               ; r8  = number to print
         mov r11, mask_binary        ; r11 = mask
 
-.Skip_front_zero:
-        cmp r8, 0h
-        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
+        mov rcx, 1h
+        cmp r8 , 0h
+        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
 
+        mov rcx, 64d / 1            ; else         { rcx = number of hex-digits in 64bit register }
+.Skip_front_zero:
         test r8, r11
         jnz .Printf_value           ; if (highest_bit(r8) != 0) jmp .Printf_value
 
         shl r8, 1h                  ; r8 = r8 << log(2)
-        jmp .Skip_front_zero
+        loop .Skip_front_zero
 
 .Printf_value:
         and r11, r8                 ; highest_bit(r11) =  highest_bit(r8)
         shr r11, 63d                ; highest_bit(r11) -> smallest_bit(r11)
 
-        mov  r11 , DIGIT_TABLE[r11]
-        mov [rdi], r11              ;
+        mov  r11b, DIGIT_TABLE[r11]
+        mov [rdi], r11b             ;
         inc  rdi                    ; <=> stosb (r11 -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
-        cmp r8, 0h
-        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
-
-        mov r11, mask_binary        ; r11 = mask
         shl r8, 1h                  ; r8 = r8 << log(2)
-        Is_full_buff .Printf_value
+        mov r11, mask_binary        ; r11 = mask
+
+        cmp rcx, 0h
+        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
+        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
 
 .Printf_suffix:
         Is_full_buff .Suffix_only
@@ -238,6 +239,7 @@ Printf_binary:
         inc  rdi                    ; <=> stosb ('b' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
+        pop rcx
         jmp Scan_format
 
 ;----------------------------------------------------------------------
@@ -246,36 +248,39 @@ Printf_binary:
 
 section .text
 Printf_octal:
+        push rcx                    ; save rcx
         mov r10,  r8                ; save r8
         mov r8 , [r8]               ; r8 = number to print
         shl r8 , 1h                 ; skip first bit
         mov r11, mask_octal         ; r11 = mask
 
-.Skip_front_zero:
-        cmp r8, 0h
-        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
+        mov rcx, 1h
+        cmp r8 , 0h
+        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
 
+        mov rcx, 63d / 3            ; else         { rcx = number of hex-digits in 64bit register }
+.Skip_front_zero:
         test r8, r11
         jnz .Printf_value           ; if (highest_octal_digit(r8) != 0) jmp .Printf_value
 
         shl r8, 3h                  ; r8 = r8 << log(8)
-        jmp .Skip_front_zero
+        loop .Skip_front_zero
 
 .Printf_value:
         and r11, r8                 ; highest_octal_digit(r11) =  highest_hex_digit(r8)
         shr r11, 61d                ; highest_octal_digit(r11) -> smallest_hex_digit(r11)
 
-        mov  r11 , DIGIT_TABLE[r11]
-        mov [rdi], r11              ;
+        mov  r11b, DIGIT_TABLE[r11]
+        mov [rdi], r11b             ;
         inc  rdi                    ; <=> stosb (r11 -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
-        cmp r8, 0h
-        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
-
-        mov r11, mask_hex           ; r11 = mask
         shl r8, 3h                  ; r8 = r8 << log(8)
-        Is_full_buff .Printf_value
+        mov r11, mask_hex           ; r11 = mask
+
+        cmp rcx, 0h
+        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
+        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
 
 .Printf_suffix:
         Is_full_buff .Suffix_only
@@ -287,6 +292,7 @@ Printf_octal:
         inc  rdi                    ; <=> stosb ('l' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
+        pop rcx
         jmp Scan_format
 
 ;----------------------------------------------------------------------
@@ -295,35 +301,38 @@ Printf_octal:
 
 section .text
 Printf_hex:
-        mov r10,  r8                ; save r8
-        mov r8 , [r8]               ; r8  = number to print
-        mov r11, mask_hex           ; r11 = mask
+        push rcx                    ; save rcx
+        mov  r10,  r8               ; save r8
+        mov  r8 , [r8]              ; r8  = number to print
+        mov  r11, mask_hex          ; r11 = mask
 
+        mov rcx, 1h
+        cmp r8 , 0h
+        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
+
+        mov rcx, 64d / 4            ; else         { rcx = number of hex-digits in 64bit register }
 .Skip_front_zero:
-        cmp r8, 0h
-        je .Printf_value            ; if (r8 == 0) jmp .Printf_value
-
         test r8, r11
         jnz .Printf_value           ; if (highest_hex_digit(r8) != 0) jmp .Printf_value
 
         shl r8, 4h                  ; r8 = r8 << log(16)
-        jmp .Skip_front_zero
+        loop .Skip_front_zero
 
 .Printf_value:
         and r11, r8                 ; highest_hex_digit(r11) =  highest_hex_digit(r8)
         shr r11, 60d                ; highest_hex_digit(r11) -> smallest_hex_digit(r11)
 
-        mov  r11 , DIGIT_TABLE[r11]
-        mov [rdi], r11              ;
+        mov  r11b, DIGIT_TABLE[r11]
+        mov [rdi], r11b             ;
         inc  rdi                    ; <=> stosb (r11 -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
-        cmp r8, 0h
-        je .Printf_suffix           ; if (r8 == 0) jmp .Printf_suffix
-
+        shl r8 , 4h                 ; r8 = r8 << log(16)
         mov r11, mask_hex           ; r11 = mask
-        shl r8, 4h                  ; r8 = r8 << log(16)
-        Is_full_buff .Printf_value
+
+        cmp rcx, 0h
+        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
+        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
 
 .Printf_suffix:
         Is_full_buff .Suffix_only
@@ -335,6 +344,7 @@ Printf_hex:
         inc  rdi                    ; <=> stosb ('h' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
+        pop rcx
         jmp Scan_format
 
 ;----------------------------------------------------------------------
