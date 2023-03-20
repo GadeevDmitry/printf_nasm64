@@ -1,4 +1,5 @@
-global _start
+%ifndef MY_PRINTF_S
+%define MY_PRINTF_S
 
 section .data
 ;                         %b,             %c,             %d
@@ -14,7 +15,7 @@ mask_hex    equ 0F000000000000000h  ; mask of highest hex    digit
 section .bss
 
 printf_buff_size equ 1024d
-PRINTF_BUFF      db (printf_buff_size + 1) dup (0h)
+PRINTF_BUFF      db (printf_buff_size + 1) dup (?)
 
 ;======================================================================
 ; Если буфер вывода полный, пишет его содержимое в файл.
@@ -67,7 +68,7 @@ PRINTF_BUFF      db (printf_buff_size + 1) dup (0h)
 ; Destroys: RCX, RDI
 ;======================================================================
 
-%macro Just_stos
+%macro Just_stos 0
 
         stosb
         dec rcx
@@ -108,11 +109,11 @@ PRINTF_BUFF      db (printf_buff_size + 1) dup (0h)
 ;----------------------------------------------------------------------
 ; Expects: DF = 0
 ;----------------------------------------------------------------------
-; Exit:
-; Destroys:
+; Exit:     none
+; Destroys: RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11
 ;======================================================================
 
-section.text
+section .text
 My_printf:
 
         push rbp
@@ -159,7 +160,7 @@ Scan_format:
         cmp al, 'd'
         ja .Stos_continue_scan          ; if (al > 'd') jmp .Stos_continue_scan
 
-        jmp [JMP_LESS + 8*(rax 0 'b')]
+        jmp [JMP_LESS + 8*(rax - 'b')]
 
 .Cmp_hexadecimal:
         cmp al, 'x'
@@ -233,7 +234,7 @@ Printf_binary:
         mov r8, r10                 ; r8 -> cur_arg
         lea r8, [r8 + 8h]           ; r8 -> next_arg
 
-        mov [rdi], 'b'              ;
+        mov byte [rdi], 'b'         ;
         inc  rdi                    ; <=> stosb ('b' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
@@ -282,7 +283,7 @@ Printf_octal:
         mov r8, r10                 ; r8 -> cur_arg
         lea r8, [r8 + 8h]           ; r8 -> next_arg
 
-        mov [rdi], 'l'              ;
+        mov byte [rdi], 'q'         ;
         inc  rdi                    ; <=> stosb ('l' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
@@ -330,11 +331,17 @@ Printf_hex:
         mov r8, r10                 ; r8 -> cur_arg
         lea r8, [r8 + 8h]           ; r8 -> next_arg
 
-        mov [rdi], 'h'              ;
+        mov byte [rdi], 'h'         ;
         inc  rdi                    ; <=> stosb ('h' -> [rdi])
         dec  rcx                    ; printf_buff size left --
 
         jmp Scan_format
+
+;----------------------------------------------------------------------
+; %d
+;----------------------------------------------------------------------
+
+Printf_decimal: jmp Printf_default
 
 ;----------------------------------------------------------------------
 ; %c
@@ -359,10 +366,18 @@ Printf_string:
         cmp al, 0h
         je .String_end              ; if (al == '\0') Is_full_buff Scan_format
 
-        Is_full_buff Printf_value
+        Is_full_buff .Printf_value
 
 .String_end:
         lea r8 , [r8 + 8h]           ; r8 -> next arg
         mov rsi, r10
 
         Is_full_buff Scan_format
+
+;----------------------------------------------------------------------
+; default
+;----------------------------------------------------------------------
+
+Printf_default: Stos_continue Scan_format
+
+%endif
