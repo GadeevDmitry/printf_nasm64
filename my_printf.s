@@ -8,9 +8,9 @@ JMP_MORE    dq Printf_octal , Printf_default, Printf_default, Printf_default, Pr
 ;                         %o,             %p,             %q,             %r,            %s
 DIGIT_TABLE db "0123456789ABCDEF"
 
-mask_binary equ  8000000000000000h  ; mask of highest binary digit
-mask_octal  equ 0E000000000000000h  ; mask of highest octal  digit
-mask_hex    equ 0F000000000000000h  ; mask of highest hex    digit
+mask_binary equ 01h ; mask of lowest binary digit
+mask_octal  equ 07h ; mask of lowest octal  digit
+mask_hex    equ 0Fh ; mask of lowest hex    digit
 
 section .bss
 
@@ -79,7 +79,7 @@ PRINTF_BUFF      db (printf_buff_size + 1) dup (?)
 ; Сохраняет символ из AL в буфер вывода и делает переход по аргументу.
 ;======================================================================
 ; Entry:    AL - character to store
-;           %1 - 
+;           %1 - addr to jump
 ;----------------------------------------------------------------------
 ; Expects:  RDI -> printf_buff index for next character
 ;           RCX  - printf_buff size left
@@ -184,169 +184,87 @@ Scan_format:
 ;----------------------------------------------------------------------
 ; HANDLERS
 ;----------------------------------------------------------------------
-; RAX -  conversion specifier
 ; RCX -  printf_buff size left
 ; RSI -  format + format_shift
 ; RDI -  PRINTF_BUFF + buff_shift
 ; R8  -> cur_arg
 ;----------------------------------------------------------------------
 
+
+;======================================================================
+; %b, %o, %x handler
+;======================================================================
+; Entry:    %1 - bit mask of lowest digit
+;           %2 - log(base of number system)
+;           %3 - suffix character to determine the number sustem
+;----------------------------------------------------------------------
+; Expects:  R8  -> number to print
+;           RCX =  printf_buff size left
+;           RDI -> free byte in printf_buff for the next character
+;           RBP =  RSP
+;----------------------------------------------------------------------
+; Exit:     none
+; Destroys: RAX, RCX, RDI, R8, R10, R11
+;======================================================================
+
+%macro Printf_2power_number_system 3
+
+        mov r10,  r8        ; save r8
+        mov r8 , [r8]       ; r8  = number to print
+        mov r11, %1         ; r11 = mask of last digit
+
+.Digit_in_stack:
+        and  r11 , r8
+        mov  r11b, DIGIT_TABLE[r11] ; r11 = ASCII(r11)
+        push r11                    ; store in stack
+
+        mov r11, %1                 ; r11 = mask of last digit
+        shr r8 , %2                 ; r8 >> log(base)
+        cmp r8 , 0h
+        jne .Digit_in_stack         ; if (r8 != 0) jmp .Digit_in_stack
+
+.Digit_in_buff:
+        pop rax                     ; rax = highest digit
+        Just_stos                   ; store rax in the buff
+        cmp rsp, rbp
+        je .Next_arg_buff_check     ; if (rsp == rbp) jmp .Next_arg_buff_check
+        Is_full_buff .Digit_in_buff ; <- else 
+
+.Next_arg_buff_check:
+        Is_full_buff .Next_arg
+.Next_arg:
+        lea r8, [r10 + 8h]          ; r8 -> next_arg
+
+        mov byte [rdi], %3          ;
+        inc rdi                     ; <=> stosb (%3 -> [rdi])
+        dec rcx                     ; printf_buff_size left --
+
+        Is_full_buff Scan_format
+
+%endmacro
+
+;======================================================================
+
 ;----------------------------------------------------------------------
 ; %b
 ;----------------------------------------------------------------------
 
 section .text
-Printf_binary:
-        push rcx                    ; save rcx
-        mov r10,  r8                ; save r8
-        mov r8 , [r8]               ; r8  = number to print
-        mov r11, mask_binary        ; r11 = mask
-
-        mov rcx, 1h
-        cmp r8 , 0h
-        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
-
-        mov rcx, 64d / 1            ; else         { rcx = number of hex-digits in 64bit register }
-.Skip_front_zero:
-        test r8, r11
-        jnz .Printf_value           ; if (highest_bit(r8) != 0) jmp .Printf_value
-
-        shl r8, 1h                  ; r8 = r8 << log(2)
-        loop .Skip_front_zero
-
-.Printf_value:
-        and r11, r8                 ; highest_bit(r11) =  highest_bit(r8)
-        shr r11, 63d                ; highest_bit(r11) -> smallest_bit(r11)
-
-        mov  r11b, DIGIT_TABLE[r11]
-        mov [rdi], r11b             ;
-        inc  rdi                    ; <=> stosb (r11 -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        shl r8, 1h                  ; r8 = r8 << log(2)
-        mov r11, mask_binary        ; r11 = mask
-
-        cmp rcx, 0h
-        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
-        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
-
-.Printf_suffix:
-        Is_full_buff .Suffix_only
-.Suffix_only:
-        mov r8, r10                 ; r8 -> cur_arg
-        lea r8, [r8 + 8h]           ; r8 -> next_arg
-
-        mov byte [rdi], 'b'         ;
-        inc  rdi                    ; <=> stosb ('b' -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        pop rcx
-        jmp Scan_format
+Printf_binary: Printf_2power_number_system mask_binary, 1h, 'b'
 
 ;----------------------------------------------------------------------
-; %o (only 63 bits)
+; %o
 ;----------------------------------------------------------------------
 
 section .text
-Printf_octal:
-        push rcx                    ; save rcx
-        mov r10,  r8                ; save r8
-        mov r8 , [r8]               ; r8 = number to print
-        shl r8 , 1h                 ; skip first bit
-        mov r11, mask_octal         ; r11 = mask
-
-        mov rcx, 1h
-        cmp r8 , 0h
-        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
-
-        mov rcx, 63d / 3            ; else         { rcx = number of hex-digits in 64bit register }
-.Skip_front_zero:
-        test r8, r11
-        jnz .Printf_value           ; if (highest_octal_digit(r8) != 0) jmp .Printf_value
-
-        shl r8, 3h                  ; r8 = r8 << log(8)
-        loop .Skip_front_zero
-
-.Printf_value:
-        and r11, r8                 ; highest_octal_digit(r11) =  highest_hex_digit(r8)
-        shr r11, 61d                ; highest_octal_digit(r11) -> smallest_hex_digit(r11)
-
-        mov  r11b, DIGIT_TABLE[r11]
-        mov [rdi], r11b             ;
-        inc  rdi                    ; <=> stosb (r11 -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        shl r8, 3h                  ; r8 = r8 << log(8)
-        mov r11, mask_hex           ; r11 = mask
-
-        cmp rcx, 0h
-        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
-        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
-
-.Printf_suffix:
-        Is_full_buff .Suffix_only
-.Suffix_only:
-        mov r8, r10                 ; r8 -> cur_arg
-        lea r8, [r8 + 8h]           ; r8 -> next_arg
-
-        mov byte [rdi], 'q'         ;
-        inc  rdi                    ; <=> stosb ('l' -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        pop rcx
-        jmp Scan_format
+Printf_octal: Printf_2power_number_system mask_octal, 3h, 'q'
 
 ;----------------------------------------------------------------------
 ; %h
 ;----------------------------------------------------------------------
 
 section .text
-Printf_hex:
-        push rcx                    ; save rcx
-        mov  r10,  r8               ; save r8
-        mov  r8 , [r8]              ; r8  = number to print
-        mov  r11, mask_hex          ; r11 = mask
-
-        mov rcx, 1h
-        cmp r8 , 0h
-        je .Printf_value            ; if (r8 == 0) { rcx = 1; jmp .Printf_value }
-
-        mov rcx, 64d / 4            ; else         { rcx = number of hex-digits in 64bit register }
-.Skip_front_zero:
-        test r8, r11
-        jnz .Printf_value           ; if (highest_hex_digit(r8) != 0) jmp .Printf_value
-
-        shl r8, 4h                  ; r8 = r8 << log(16)
-        loop .Skip_front_zero
-
-.Printf_value:
-        and r11, r8                 ; highest_hex_digit(r11) =  highest_hex_digit(r8)
-        shr r11, 60d                ; highest_hex_digit(r11) -> smallest_hex_digit(r11)
-
-        mov  r11b, DIGIT_TABLE[r11]
-        mov [rdi], r11b             ;
-        inc  rdi                    ; <=> stosb (r11 -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        shl r8 , 4h                 ; r8 = r8 << log(16)
-        mov r11, mask_hex           ; r11 = mask
-
-        cmp rcx, 0h
-        je .Printf_suffix           ; if (rcx == 0) jmp .Printf_suffix
-        Is_full_buff .Printf_value  ; else Is_full_buff .Printf_value
-
-.Printf_suffix:
-        Is_full_buff .Suffix_only
-.Suffix_only:
-        mov r8, r10                 ; r8 -> cur_arg
-        lea r8, [r8 + 8h]           ; r8 -> next_arg
-
-        mov byte [rdi], 'h'         ;
-        inc  rdi                    ; <=> stosb ('h' -> [rdi])
-        dec  rcx                    ; printf_buff size left --
-
-        pop rcx
-        jmp Scan_format
+Printf_hex: Printf_2power_number_system mask_hex, 4h, 'h'
 
 ;----------------------------------------------------------------------
 ; %d
