@@ -98,6 +98,53 @@ PRINTF_BUFF      db (printf_buff_size + 1) dup (?)
 %endmacro
 
 ;======================================================================
+; Переходник x86-64 STDCALL --> CDECL для My_printf
+;======================================================================
+; Entry:    RDI, RSI, RDX, RCX, R8, R9
+; Stack:    ___________________________
+;          |_...__VA_ARGS___|_ret addr_|
+;                                      ^
+;                                      top
+;----------------------------------------------------------------------
+; Expects:  DF = 0
+;----------------------------------------------------------------------
+; Exit:     none
+; Destroys: RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11
+;======================================================================
+
+section .bss
+my_printf_stderr_ret_addr dq ?
+
+;----------------------------------------------------------------------
+
+global My_printf_stderr
+
+section .text
+My_printf_stderr:
+
+        xchg r9, [rsp]                          ; swap(r9, [rsp] = ret addr)
+        mov  [my_printf_stderr_ret_addr], r9    ; save ret addr in memory
+        push r8
+        push rcx
+        push rdx
+        push rsi
+        push rdi
+        push 0                                  ; fd(stderr)
+
+        call My_printf
+
+        lea rsp, [rsp + 8]                      ; skip fd
+        pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+        pop r8
+        pop r9
+
+        push qword [my_printf_stderr_ret_addr]  ; load saved ret addr
+        ret
+
+;======================================================================
 ; Преобразует и пишет строку в файл под управлением format
 ;======================================================================
 ; Entry:  ______________________________
