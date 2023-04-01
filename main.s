@@ -17,7 +17,7 @@ main:
         call My_printf_stderr
         call printf
 
-        add  rsp, 18h
+        add  rsp, 8h
 
 ;---------------------------;
 
