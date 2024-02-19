@@ -1,4 +1,1 @@
-TEST/
-
-*.o
-*.lst
+build/

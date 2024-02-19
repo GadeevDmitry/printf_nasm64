@@ -1,8 +1,18 @@
-main: main.o
-	gcc -no-pie $< -o $@
+BUILD_DIR := build/
 
-main.o: main.s my_printf.s
-	nasm -f elf64 $< -l main.lst
+#--------------------------------------------------------------------------------------------------------------------------------
 
-my_printf.o: my_printf.s
-	nasm -f elf64 $< -l my_printf.lst
+all: | $(BUILD_DIR)
+	nasm -f elf64 main.s -o $(BUILD_DIR)main.o -l $(BUILD_DIR)main.lst
+	gcc -no-pie $(BUILD_DIR)main.o -o $(BUILD_DIR)main
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+.PHONY: run
+run:
+	@./$(BUILD_DIR)main
+
+.PHONY: clean
+clean:
+	rm -rf $(BUILD_DIR)
